@@ -834,9 +834,18 @@ impl Config {
             std::fs::create_dir_all(&path).ok();
             return path;
         }
+        // On Windows, try user's AppData first, then ProgramData (for SYSTEM user)
         if let Some(path) = Self::path("").parent() {
             let mut path: PathBuf = path.into();
             path.push("log");
+            return path;
+        }
+        // Fallback for SYSTEM user: use ProgramData
+        if let Ok(allusersprofile) = std::env::var("ALLUSERSPROFILE") {
+            let mut path = PathBuf::from(&allusersprofile);
+            path.push(APP_NAME.read().unwrap().clone());
+            path.push("log");
+            std::fs::create_dir_all(&path).ok();
             return path;
         }
         "".into()
@@ -912,18 +921,18 @@ impl Config {
 
     pub fn get_rendezvous_server() -> String {
         let mut rendezvous_server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
-        if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_option("custom-rendezvous-server");
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
-        }
         // RENDEZVOUS_SERVERS (hardcoded constant) takes priority over stale config file
         if rendezvous_server.is_empty() {
             rendezvous_server = Self::get_rendezvous_servers()
                 .drain(..)
                 .next()
                 .unwrap_or_default();
+        }
+        if rendezvous_server.is_empty() {
+            rendezvous_server = Self::get_option("custom-rendezvous-server");
+        }
+        if rendezvous_server.is_empty() {
+            rendezvous_server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
         }
         if rendezvous_server.is_empty() {
             rendezvous_server = CONFIG2.read().unwrap().rendezvous_server.clone();
