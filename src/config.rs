@@ -69,7 +69,7 @@ lazy_static::lazy_static! {
     static ref ONLINE: Mutex<HashMap<String, i64>> = Default::default();
     pub static ref PROD_RENDEZVOUS_SERVER: RwLock<String> = RwLock::new("".to_owned());
     pub static ref EXE_RENDEZVOUS_SERVER: RwLock<String> = Default::default();
-    pub static ref APP_NAME: RwLock<String> = RwLock::new("RustDesk".to_owned());
+    pub static ref APP_NAME: RwLock<String> = RwLock::new("digiDesk".to_owned());
     static ref KEY_PAIR: Mutex<Option<KeyPair>> = Default::default();
     static ref USER_DEFAULT_CONFIG: RwLock<(UserDefaultConfig, Instant)> = RwLock::new((UserDefaultConfig::load(), Instant::now()));
     pub static ref NEW_STORED_PEER_CONFIG: Mutex<HashSet<String>> = Default::default();
@@ -117,8 +117,8 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];
-pub const RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
+pub const RENDEZVOUS_SERVERS: &[&str] = &["support.mrsdigi.com"];
+pub const RS_PUB_KEY: &str = "hDx8T+QSrVnAUx5nKNkY5phjZbou8JqfBQWUZ93BKkI=";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;
@@ -834,9 +834,18 @@ impl Config {
             std::fs::create_dir_all(&path).ok();
             return path;
         }
+        // On Windows, try user's AppData first, then ProgramData (for SYSTEM user)
         if let Some(path) = Self::path("").parent() {
             let mut path: PathBuf = path.into();
             path.push("log");
+            return path;
+        }
+        // Fallback for SYSTEM user: use ProgramData
+        if let Ok(allusersprofile) = std::env::var("ALLUSERSPROFILE") {
+            let mut path = PathBuf::from(&allusersprofile);
+            path.push(APP_NAME.read().unwrap().clone());
+            path.push("log");
+            std::fs::create_dir_all(&path).ok();
             return path;
         }
         "".into()
@@ -912,6 +921,13 @@ impl Config {
 
     pub fn get_rendezvous_server() -> String {
         let mut rendezvous_server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
+        // RENDEZVOUS_SERVERS (hardcoded constant) takes priority over stale config file
+        if rendezvous_server.is_empty() {
+            rendezvous_server = Self::get_rendezvous_servers()
+                .drain(..)
+                .next()
+                .unwrap_or_default();
+        }
         if rendezvous_server.is_empty() {
             rendezvous_server = Self::get_option("custom-rendezvous-server");
         }
@@ -920,12 +936,6 @@ impl Config {
         }
         if rendezvous_server.is_empty() {
             rendezvous_server = CONFIG2.read().unwrap().rendezvous_server.clone();
-        }
-        if rendezvous_server.is_empty() {
-            rendezvous_server = Self::get_rendezvous_servers()
-                .drain(..)
-                .next()
-                .unwrap_or_default();
         }
         if !rendezvous_server.contains(':') {
             rendezvous_server = format!("{rendezvous_server}:{RENDEZVOUS_PORT}");
