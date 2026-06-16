@@ -452,7 +452,8 @@ fn get_ext(name: &str) -> &str {
 
 #[inline]
 fn is_compressed_file(name: &str) -> bool {
-    let compressed_exts = ["xz", "gz", "zip", "7z", "rar", "bz2", "tgz", "png", "jpg"];
+    let compressed_exts = ["xz", "gz", "zip", "7z", "rar", "bz2", "tgz", "png", "jpg",
+        "jpeg", "gif", "webp", "avif", "mp4", "mp3", "aac", "pdf", "docx", "xlsx", "pptx"];
     let ext = get_ext(name);
     compressed_exts.contains(&ext)
 }
@@ -949,8 +950,23 @@ impl TransferJob {
             }
             DataSource::MemoryCursor(..) => "",
         };
-        const BUF_SIZE: usize = 128 * 1024;
-        let mut buf: Vec<u8> = vec![0; BUF_SIZE];
+        // Dynamic buffer size based on file size for optimal throughput
+        let file_size = match &self.data_source {
+            DataSource::FilePath(_) if (self.file_num as usize) < self.files.len() => {
+                self.files[self.file_num as usize].size
+            }
+            _ => 0,
+        };
+        let buf_size = if file_size > 100 * 1024 * 1024 {
+            4 * 1024 * 1024       // 4MB for large files (>100MB)
+        } else if file_size > 10 * 1024 * 1024 {
+            2 * 1024 * 1024       // 2MB for medium files (10-100MB)
+        } else if file_size > 1024 * 1024 {
+            1024 * 1024           // 1MB for small files (1-10MB)
+        } else {
+            512 * 1024            // 512KB for tiny files (<1MB) and non-file sources
+        };
+        let mut buf: Vec<u8> = vec![0; buf_size];
         let mut compressed = false;
         let mut offset: usize = 0;
         loop {
@@ -970,7 +986,7 @@ impl TransferJob {
                 }
                 Ok(n) => {
                     offset += n;
-                    if n == 0 || offset == BUF_SIZE {
+                    if n == 0 || offset == buf_size {
                         break;
                     }
                 }
@@ -1340,18 +1356,25 @@ pub async fn handle_read_jobs(
 
     let mut job_log = Default::default();
     let mut finished = Vec::new();
+    let mut active_jobs = 0usize;
+    const MAX_PARALLEL_TRANSFERS: usize = 3;
     for job in jobs.iter_mut() {
         if job.is_last_job {
             continue;
+        }
+        if active_jobs >= MAX_PARALLEL_TRANSFERS {
+            break;
         }
         match job.read().await {
             Err(err) => {
                 stream
                     .send(&new_error(job.id(), err, job.file_num()))
                     .await?;
+                active_jobs += 1;
             }
             Ok(Some(block)) => {
                 stream.send(&new_block(block)).await?;
+                active_jobs += 1;
             }
             Ok(None) => {
                 if job.job_completed() {
@@ -1367,12 +1390,10 @@ pub async fn handle_read_jobs(
                         None => stream.send(&new_done(job.id(), job.file_num())).await?,
                     }
                 } else {
-                    // waiting confirmation.
+                    // waiting confirmation — doesn't count as active
                 }
             }
         }
-        // Break to handle jobs one by one.
-        break;
     }
     for id in finished {
         let _ = remove_job(id, jobs);
