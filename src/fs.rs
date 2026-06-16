@@ -307,6 +307,7 @@ impl JobType {
 }
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub enum DataSource {
     FilePath(PathBuf),
     MemoryCursor(Cursor<Vec<u8>>),
@@ -379,7 +380,7 @@ impl DataStream {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug)]
+#[derive(Default, Serialize, Deserialize, Debug, Clone)]
 pub struct FileDigest {
     pub size: u64,
     pub modified: u64,
@@ -1209,6 +1210,66 @@ impl TransferJob {
             show_hidden: self.show_hidden,
             is_remote: self.is_remote,
         }
+    }
+
+    /// Split job into multiple sub-jobs with at most `max_files` each
+    /// Returns vec with self if files.len() <= max_files (no split needed)
+    pub fn split(self, max_files: usize) -> Vec<Self> {
+        let file_count = self.files.len();
+        if file_count <= max_files {
+            return vec![self];
+        }
+
+        let chunk_count = (file_count + max_files - 1) / max_files;
+        let chunk_size = (file_count + chunk_count - 1) / chunk_count;
+
+        let mut jobs = Vec::with_capacity(chunk_count);
+        let mut remaining_files = self.files;
+
+        for chunk_idx in 0..chunk_count {
+            let start = chunk_idx * chunk_size;
+            let end = std::cmp::min(start + chunk_size, remaining_files.len());
+
+            if start >= end {
+                break;
+            }
+
+            let chunk_files: Vec<_> = remaining_files.drain(..end - start).collect();
+            let total_size: u64 = chunk_files.iter().map(|f| f.size).sum();
+
+            let job = Self {
+                id: if chunk_idx == 0 {
+                    self.id // Keep original ID for first chunk
+                } else {
+                    self.id + chunk_idx as i32 // Generate sequential IDs
+                },
+                file_num: chunk_files.len() as i32,
+                files: chunk_files,
+                total_size,
+                // Copy all other fields from self
+                remote: self.remote.clone(),
+                data_source: self.data_source.clone(),
+                show_hidden: self.show_hidden,
+                is_remote: self.is_remote,
+                is_last_job: false,
+                is_resume: false,
+                conn_id: self.conn_id,
+                data_stream: None,
+                finished_size: 0,
+                transferred: 0,
+                enable_overwrite_detection: self.enable_overwrite_detection,
+                file_confirmed: false,
+                file_skipped: false,
+                file_is_waiting: false,
+                default_overwrite_strategy: self.default_overwrite_strategy,
+                digest: self.digest.clone(),
+                r#type: self.r#type,
+            };
+
+            jobs.push(job);
+        }
+
+        jobs
     }
 }
 
