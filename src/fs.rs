@@ -306,7 +306,7 @@ impl JobType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DataSource {
     FilePath(PathBuf),
     MemoryCursor(Cursor<Vec<u8>>),
@@ -379,7 +379,7 @@ impl DataStream {
     }
 }
 
-#[derive(Default, Serialize, Deserialize, Debug)]
+#[derive(Default, Clone, Serialize, Deserialize, Debug)]
 pub struct FileDigest {
     pub size: u64,
     pub modified: u64,
@@ -1215,6 +1215,55 @@ impl TransferJob {
             show_hidden: self.show_hidden,
             is_remote: self.is_remote,
         }
+    }
+
+    /// Split a large file list into `chunks` sub-jobs for parallel transfer.
+    /// The first chunk keeps the original job ID; subsequent chunks get new IDs.
+    /// Returns vec![self] if splitting is not beneficial.
+    pub fn split(self, chunks: usize) -> Vec<TransferJob> {
+        let file_count = self.files.len();
+        // Don't split if too few files or invalid chunk count
+        if file_count < 2 || chunks < 2 {
+            return vec![self];
+        }
+        let actual_chunks = chunks.min(file_count);
+        let chunk_size = (file_count + actual_chunks - 1) / actual_chunks;
+        let mut result = Vec::with_capacity(actual_chunks);
+
+        for (i, chunk) in self.files.chunks(chunk_size).enumerate() {
+            let is_first = i == 0;
+            let total_size: u64 = chunk.iter().map(|f| f.size).sum();
+            let sub_id = if is_first {
+                self.id
+            } else {
+                get_next_job_id()
+            };
+            let job = Self {
+                id: sub_id,
+                r#type: self.r#type,
+                remote: self.remote.clone(),
+                data_source: self.data_source.clone(),
+                show_hidden: self.show_hidden,
+                is_remote: self.is_remote,
+                is_last_job: false,
+                is_resume: false,
+                file_num: 0,
+                files: chunk.to_vec(),
+                conn_id: self.conn_id,
+                data_stream: None,
+                total_size,
+                finished_size: 0,
+                transferred: 0,
+                enable_overwrite_detection: self.enable_overwrite_detection,
+                file_confirmed: false,
+                file_skipped: false,
+                file_is_waiting: false,
+                default_overwrite_strategy: self.default_overwrite_strategy,
+                digest: self.digest.clone(),
+            };
+            result.push(job);
+        }
+        result
     }
 }
 
