@@ -389,6 +389,12 @@ pub struct FileDigest {
 #[serde(rename_all = "camelCase")]
 pub struct TransferJob {
     pub id: i32,
+    /// For split sub-jobs: the original parent job ID to report to the UI.
+    /// `None` for normal (unsplit) jobs. All sub-jobs created by `split()`
+    /// carry `Some(parent_id)` so that progress / done / error / cancel can
+    /// be aggregated back under the single UI-visible parent ID.
+    #[serde(skip_serializing)]
+    pub parent_id: Option<i32>,
     pub r#type: JobType,
     pub remote: String,
     pub data_source: DataSource,
@@ -665,6 +671,18 @@ impl TransferJob {
     #[inline]
     pub fn id(&self) -> i32 {
         self.id
+    }
+
+    #[inline]
+    pub fn parent_id(&self) -> Option<i32> {
+        self.parent_id
+    }
+
+    /// The job ID the UI should attribute this job's progress/status to.
+    /// For split sub-jobs this is the parent ID; otherwise the job's own ID.
+    #[inline]
+    pub fn report_id(&self) -> i32 {
+        self.parent_id.unwrap_or(self.id)
     }
 
     #[inline]
@@ -1240,13 +1258,17 @@ impl TransferJob {
             };
             let job = Self {
                 id: sub_id,
+                // Every sub-job (including the first, which keeps the parent
+                // id) records the parent id so the UI layer can aggregate
+                // progress/done/error/cancel back under one visible id.
+                parent_id: Some(self.id),
                 r#type: self.r#type,
                 remote: self.remote.clone(),
                 data_source: self.data_source.clone(),
                 show_hidden: self.show_hidden,
                 is_remote: self.is_remote,
                 is_last_job: false,
-                is_resume: false,
+                is_resume: self.is_resume,
                 file_num: 0,
                 files: chunk.to_vec(),
                 conn_id: self.conn_id,
