@@ -420,6 +420,15 @@ pub struct TransferJob {
     default_overwrite_strategy: Option<bool>,
     #[serde(skip_serializing)]
     digest: FileDigest,
+    // Adaptive compression: sample the first block of each file; if the
+    // compression ratio is below 10 %, skip compression for the remaining
+    // blocks of that file to save CPU on both sender and receiver.
+    #[serde(skip_serializing)]
+    compress_skip: bool,
+    #[serde(skip_serializing)]
+    compress_first_block: bool,
+    #[serde(skip_serializing)]
+    compress_file_num: Option<i32>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -984,7 +993,16 @@ impl TransferJob {
         } else {
             512 * 1024            // 512KB for tiny files (<1MB) and non-file sources
         };
-        let mut buf: Vec<u8> = vec![0; buf_size];
+        // Allocate without zeroing — the read loop below fills the buffer
+        // with actual file data before any bytes are read from it.  This
+        // avoids a wasteful memset of up to 4 MB on every block.
+        let mut buf: Vec<u8> = Vec::with_capacity(buf_size);
+        // SAFETY: buf has capacity buf_size but uninitialized contents.
+        // The read() call writes to buf[offset..] before any reads from
+        // buf.  After the loop, set_len(offset) truncates to only the
+        // initialized bytes.  On error we return early without accessing
+        // buf's contents, and Vec::drop only deallocates (never reads).
+        unsafe { buf.set_len(buf_size); }
         let mut compressed = false;
         let mut offset: usize = 0;
         loop {
@@ -1023,10 +1041,36 @@ impl TransferJob {
         } else {
             self.finished_size += offset as u64;
             if matches!(self.data_source, DataSource::FilePath(_)) && !is_compressed_file(name) {
-                let tmp = compress(&buf);
-                if tmp.len() < buf.len() {
-                    buf = tmp;
-                    compressed = true;
+                // Detect file change to reset adaptive compression state.
+                if self.compress_file_num != Some(self.file_num) {
+                    self.compress_skip = false;
+                    self.compress_first_block = true;
+                    self.compress_file_num = Some(self.file_num);
+                }
+
+                if self.compress_skip {
+                    // Already determined this file doesn't benefit from
+                    // compression — skip to save CPU on both sides.
+                } else {
+                    let tmp = compress(&buf);
+                    if tmp.len() < buf.len() {
+                        if self.compress_first_block {
+                            // Sample: if < 10 % savings, skip compression
+                            // for the rest of this file.
+                            let ratio =
+                                1.0 - (tmp.len() as f64 / buf.len() as f64);
+                            if ratio < 0.10 {
+                                self.compress_skip = true;
+                            } else {
+                                buf = tmp;
+                                compressed = true;
+                            }
+                        } else {
+                            buf = tmp;
+                            compressed = true;
+                        }
+                    }
+                    self.compress_first_block = false;
                 }
             }
             self.transferred += buf.len() as u64;
@@ -1235,27 +1279,68 @@ impl TransferJob {
         }
     }
 
-    /// Split a large file list into `chunks` sub-jobs for parallel transfer.
-    /// The first chunk keeps the original job ID; subsequent chunks get new IDs.
-    /// Returns vec![self] if splitting is not beneficial.
-    pub fn split(self, chunks: usize) -> Vec<TransferJob> {
+    /// Dynamically split a file list into sub-jobs for parallel transfer.
+    /// The number of sub-jobs is decided from both total transfer size and
+    /// file count.  Files are distributed by **size** so that each sub-job
+    /// handles roughly the same number of bytes — avoiding the imbalance
+    /// where one sub-job gets all the large files and the others finish
+    /// instantly.
+    ///
+    /// Decision matrix (capped at MAX_PARALLEL_TRANSFERS = 3):
+    ///   total < 10 MB or files < 50   →  1 sub-job (no split)
+    ///   total ≥ 10 MB and files ≥ 50  →  2 sub-jobs
+    ///   total ≥ 100 MB and files ≥ 100 → 3 sub-jobs
+    ///
+    /// The first chunk keeps the original job ID; subsequent chunks get
+    /// new IDs.  Returns `vec![self]` if splitting is not beneficial.
+    pub fn split(self) -> Vec<TransferJob> {
         let file_count = self.files.len();
-        // Don't split if too few files or invalid chunk count
-        if file_count < 2 || chunks < 2 {
+        if file_count < 2 {
             return vec![self];
         }
-        let actual_chunks = chunks.min(file_count);
-        let chunk_size = (file_count + actual_chunks - 1) / actual_chunks;
-        let mut result = Vec::with_capacity(actual_chunks);
 
-        for (i, chunk) in self.files.chunks(chunk_size).enumerate() {
-            let is_first = i == 0;
-            let total_size: u64 = chunk.iter().map(|f| f.size).sum();
-            let sub_id = if is_first {
-                self.id
-            } else {
-                get_next_job_id()
-            };
+        // Dynamic sub-job count — capped at 3 (= MAX_PARALLEL_TRANSFERS
+        // in handle_read_jobs, so every sub-job gets a slot immediately).
+        const MAX_SUB_JOBS: usize = 3;
+        const MB: u64 = 1024 * 1024;
+        let total_size = self.total_size;
+
+        let sub_jobs = if total_size >= 100 * MB && file_count >= 100 {
+            MAX_SUB_JOBS.min(file_count)
+        } else if total_size >= 10 * MB && file_count >= 50 {
+            2.min(file_count)
+        } else {
+            1
+        };
+
+        if sub_jobs < 2 {
+            return vec![self];
+        }
+
+        // Size-balanced splitting: distribute files so each sub-job
+        // gets approximately the same total byte count.
+        let target_per_job = total_size / sub_jobs as u64;
+        let mut chunks: Vec<Vec<FileEntry>> = Vec::with_capacity(sub_jobs);
+        let mut current: Vec<FileEntry> = Vec::new();
+        let mut current_size: u64 = 0;
+
+        for file in &self.files {
+            current.push(file.clone());
+            current_size += file.size;
+            if current_size >= target_per_job && chunks.len() < sub_jobs - 1 {
+                chunks.push(std::mem::take(&mut current));
+                current_size = 0;
+            }
+        }
+        if !current.is_empty() {
+            chunks.push(current);
+        }
+
+        // Build sub-jobs from the size-balanced chunks.
+        let mut result = Vec::with_capacity(chunks.len());
+        for (i, chunk) in chunks.into_iter().enumerate() {
+            let chunk_total: u64 = chunk.iter().map(|f| f.size).sum();
+            let sub_id = if i == 0 { self.id } else { get_next_job_id() };
             let job = Self {
                 id: sub_id,
                 // Every sub-job (including the first, which keeps the parent
@@ -1270,10 +1355,10 @@ impl TransferJob {
                 is_last_job: false,
                 is_resume: self.is_resume,
                 file_num: 0,
-                files: chunk.to_vec(),
+                files: chunk,
                 conn_id: self.conn_id,
                 data_stream: None,
-                total_size,
+                total_size: chunk_total,
                 finished_size: 0,
                 transferred: 0,
                 enable_overwrite_detection: self.enable_overwrite_detection,
@@ -1282,6 +1367,9 @@ impl TransferJob {
                 file_is_waiting: false,
                 default_overwrite_strategy: self.default_overwrite_strategy,
                 digest: self.digest.clone(),
+                compress_skip: false,
+                compress_first_block: false,
+                compress_file_num: None,
             };
             result.push(job);
         }
