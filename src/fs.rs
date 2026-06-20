@@ -1128,6 +1128,12 @@ impl TransferJob {
 
     pub fn set_file_skipped(&mut self) -> bool {
         log::debug!("skip file {} in job {}", self.file_num, self.id);
+        // Add the skipped file's size to finished_size so the progress
+        // percentage stays accurate (total_size includes all files).
+        let idx = self.file_num as usize;
+        if idx < self.files.len() {
+            self.finished_size += self.files[idx].size;
+        }
         self.data_stream.take();
         self.set_file_confirmed(false);
         self.set_file_is_waiting(false);
