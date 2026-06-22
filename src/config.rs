@@ -117,7 +117,7 @@ const CHARS: &[char] = &[
     'm', 'n', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z',
 ];
 
-pub const RENDEZVOUS_SERVERS: &[&str] = &["support.mrsdigi.com"];
+pub const RENDEZVOUS_SERVERS: &[&str] = &["support.mrsdigi.com", "192.168.8.5"];
 pub const RS_PUB_KEY: &str = "hDx8T+QSrVnAUx5nKNkY5phjZbou8JqfBQWUZ93BKkI=";
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
