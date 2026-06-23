@@ -125,6 +125,29 @@ pub const RELAY_PORT: i32 = 21117;
 pub const WS_RENDEZVOUS_PORT: i32 = 21118;
 pub const WS_RELAY_PORT: i32 = 21119;
 
+/// Check if the configured rendezvous server is a self-hosted (non-rustdesk.com) server.
+/// Returns true if the server appears to be custom/self-hosted.
+/// Reads config sources directly to avoid circular dependency with get_option().
+#[inline]
+fn is_self_hosted_server() -> bool {
+    // Read rendezvous server directly from config sources, bypassing get_option()
+    // to avoid infinite recursion (get_option → is_self_hosted_server → get_rendezvous_server → get_option).
+    let mut server = EXE_RENDEZVOUS_SERVER.read().unwrap().clone();
+    if server.is_empty() {
+        server = RENDEZVOUS_SERVERS.first().unwrap_or(&"").to_string();
+    }
+    if server.is_empty() {
+        server = PROD_RENDEZVOUS_SERVER.read().unwrap().clone();
+    }
+    if server.is_empty() {
+        server = CONFIG2.read().unwrap().rendezvous_server.clone();
+    }
+    let server = server.to_ascii_lowercase();
+    !server.contains("rustdesk.com/")
+        && !server.ends_with("rustdesk.com")
+        && !server.is_empty()
+}
+
 #[inline]
 pub fn is_service_ipc_postfix(postfix: &str) -> bool {
     // `_service` is a protected cross-user IPC channel used by the root service.
@@ -1253,13 +1276,24 @@ impl Config {
     }
 
     pub fn get_option(k: &str) -> String {
-        get_or(
+        let v = get_or(
             &OVERWRITE_SETTINGS,
             &CONFIG2.read().unwrap().options,
             &DEFAULT_SETTINGS,
             k,
         )
-        .unwrap_or_default()
+        .unwrap_or_default();
+        // Self-hosted servers: enable auto-update options by default
+        if v.is_empty() {
+            if is_self_hosted_server() {
+                if k == keys::OPTION_ALLOW_AUTO_UPDATE
+                    || k == keys::OPTION_ENABLE_CHECK_UPDATE
+                {
+                    return "Y".to_owned();
+                }
+            }
+        }
+        v
     }
 
     pub fn get_bool_option(k: &str) -> bool {
