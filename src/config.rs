@@ -1367,6 +1367,30 @@ impl Config {
         true
     }
 
+    /// Verify a plaintext password against the stored permanent password.
+    ///
+    /// Returns `true` if the password matches either the local stored password
+    /// or the preset password.
+    pub fn verify_permanent_password_plain(password: &str) -> bool {
+        let (local_storage, local_salt) = Self::get_local_permanent_password_storage_and_salt();
+        if !local_storage.is_empty() && !local_salt.is_empty() {
+            let h1 = compute_permanent_password_h1(password, &local_salt);
+            if let Some(expected) = encode_permanent_password_encrypted_storage_from_h1(&h1) {
+                if expected == local_storage {
+                    return true;
+                }
+            }
+        }
+        let (preset_storage, preset_salt) = Self::get_preset_password_storage_and_salt();
+        if !preset_storage.is_empty() && !preset_salt.is_empty() {
+            if preset_permanent_password_storage_matches_plain(&preset_storage, &preset_salt, password)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     fn compute_permanent_password_storage_for_update(
         config: &mut Config,
         password: &str,
