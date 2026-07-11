@@ -97,6 +97,12 @@ impl FramedStream {
                     super::timeout(ms_timeout, socket.connect(remote_addr)).await
                 {
                     stream.set_nodelay(true).ok();
+                    socket2_05::SockRef::from(&stream)
+                        .set_tcp_keepalive(
+                            &socket2_05::TcpKeepalive::new()
+                                .with_time(std::time::Duration::from_secs(30)),
+                        )
+                        .ok();
                     let addr = stream.local_addr()?;
                     return Ok(Self(
                         Framed::new(DynTcpStream(Box::new(stream)), BytesCodec::new()),
