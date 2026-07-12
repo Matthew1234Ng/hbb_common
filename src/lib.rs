@@ -58,6 +58,7 @@ pub use uuid;
 pub mod fingerprint;
 pub use flexi_logger;
 pub mod stream;
+pub mod tunnel_mux;
 pub mod websocket;
 #[cfg(feature = "webrtc")]
 pub mod webrtc;
