@@ -100,7 +100,7 @@ impl FramedStream {
                     socket2_05::SockRef::from(&stream)
                         .set_tcp_keepalive(
                             &socket2_05::TcpKeepalive::new()
-                                .with_time(std::time::Duration::from_secs(30)),
+                                .with_time(std::time::Duration::from_secs(8)),
                         )
                         .ok();
                     let addr = stream.local_addr()?;
