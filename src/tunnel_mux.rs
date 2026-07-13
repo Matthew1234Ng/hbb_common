@@ -14,8 +14,19 @@ pub struct TunnelMux {
 
 impl TunnelMux {
     pub fn new(stream: Stream) -> Self {
+        Self::with_prefill(stream, Vec::new())
+    }
+
+    pub fn with_prefill(stream: Stream, prefill: Vec<u8>) -> Self {
         let (tx_read, rx) = mpsc::channel::<io::Result<BytesMut>>(64);
         let (tx, mut rx_write) = mpsc::unbounded_channel::<Vec<u8>>();
+
+        if !prefill.is_empty() {
+            let tx_read2 = tx_read.clone();
+            tokio::spawn(async move {
+                let _ = tx_read2.send(Ok(BytesMut::from(&prefill[..]))).await;
+            });
+        }
 
         tokio::spawn(async move {
             TunnelMux::run(stream, tx_read, &mut rx_write).await;
