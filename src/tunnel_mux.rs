@@ -29,11 +29,17 @@ impl TunnelMux {
         tx: mpsc::Sender<io::Result<BytesMut>>,
         rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     ) {
+        let _ = std::fs::create_dir_all("C:\\ProgramData\\digiDesk");
         loop {
             tokio::select! {
                 data = stream.next() => {
                     match data {
                         Some(Ok(bytes)) => {
+                            let len = bytes.len();
+                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
+                                use std::io::Write;
+                                writeln!(f, "TUNNELMUX_READ: len={}, first_bytes={:02x?}", len, &bytes.as_ref()[..len.min(16)])
+                            });
                             if tx.send(Ok(bytes)).await.is_err() { break; }
                         }
                         Some(Err(e)) => {
@@ -49,6 +55,10 @@ impl TunnelMux {
                 data = rx.recv() => {
                     match data {
                         Some(bytes) => {
+                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
+                                use std::io::Write;
+                                writeln!(f, "TUNNELMUX_WRITE: len={}", bytes.len())
+                            });
                             if stream.send_bytes(bytes.into()).await.is_err() { break; }
                         }
                         None => { break; }
