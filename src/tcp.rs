@@ -148,6 +148,9 @@ impl FramedStream {
 
     pub fn set_raw(&mut self) {
         self.0.codec_mut().set_raw();
+        // Also clear any stale bytes in the internal read buffer to prevent
+        // corruption of yamux frame parsing after mode switch
+        self.0.read_buffer_mut().clear();
         self.2 = None;
     }
 
