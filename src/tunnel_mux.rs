@@ -54,10 +54,18 @@ impl TunnelMux {
                             if tx.send(Ok(bytes)).await.is_err() { break; }
                         }
                         Some(Err(e)) => {
+                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
+                                use std::io::Write;
+                                writeln!(f, "TUNNELMUX_EXIT: stream.next() error: {}", e)
+                            });
                             let _ = tx.send(Err(e)).await;
                             break;
                         }
                         None => {
+                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
+                                use std::io::Write;
+                                writeln!(f, "TUNNELMUX_EXIT: stream.next() returned None (EOF)")
+                            });
                             let _ = tx.send(Err(io::Error::new(io::ErrorKind::ConnectionAborted, "stream closed"))).await;
                             break;
                         }
@@ -70,7 +78,13 @@ impl TunnelMux {
                                 use std::io::Write;
                                 writeln!(f, "TUNNELMUX_WRITE: len={}", bytes.len())
                             });
-                            if stream.send_bytes(bytes.into()).await.is_err() { break; }
+                            if stream.send_bytes(bytes.into()).await.is_err() {
+                                let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
+                                    use std::io::Write;
+                                    writeln!(f, "TUNNELMUX_EXIT: send_bytes failed")
+                                });
+                                break;
+                            }
                         }
                         None => { break; }
                     }
