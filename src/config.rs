@@ -28,8 +28,9 @@ pub use permanent_password::{
 };
 use permanent_password::{
     decode_permanent_password_h1_from_hashed_storage, decrypt_permanent_password_str_or_original,
-    encode_permanent_password_encrypted_storage_from_h1, password_is_empty_or_not_hashed,
-    preset_permanent_password_storage_matches_plain, DEFAULT_SALT_LEN, PASSWORD_ENC_VERSION,
+    encode_permanent_password_encrypted_storage_from_h1,
+    encode_permanent_password_storage_from_h1, local_permanent_password_storage_matches_plain,
+    password_is_empty_or_not_hashed, preset_permanent_password_storage_matches_plain, DEFAULT_SALT_LEN, PASSWORD_ENC_VERSION,
 };
 
 use crate::{
@@ -1461,6 +1462,21 @@ impl Config {
         let storage = hard_settings.get("password").cloned().unwrap_or_default();
         let salt = hard_settings.get("salt").cloned().unwrap_or_default();
         (storage, salt)
+    }
+
+    /// Apply a preset password from plaintext. Writes to HARD_SETTINGS.
+    /// Idempotent: no-op if already set. Used by CLI --apply-preset-password.
+    pub fn apply_preset_password(password: &str) -> bool {
+        let mut hard = HARD_SETTINGS.write().unwrap();
+        if hard.contains_key("password") && !hard["password"].is_empty() {
+            return true;
+        }
+        let salt = "digidesk-preset-salt-v1".to_owned();
+        let h1 = compute_permanent_password_h1(password, &salt);
+        let storage = encode_permanent_password_storage_from_h1(&h1);
+        hard.insert("password".to_owned(), storage);
+        hard.insert("salt".to_owned(), salt);
+        true
     }
 
     pub fn get_effective_permanent_password_salt() -> String {
