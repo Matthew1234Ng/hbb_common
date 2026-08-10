@@ -486,14 +486,18 @@ pub fn validate_file_name_no_traversal(name: &str) -> ResultType<()> {
     }
     #[cfg(windows)]
     {
-        if name.len() >= 2 {
-            let bytes = name.as_bytes();
-            if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        // Allow UNC paths (\\server\share) — they are valid Windows paths for remote file transfer.
+        let is_unc = name.starts_with("\\\\") || name.starts_with("//");
+        if !is_unc {
+            if name.len() >= 2 {
+                let bytes = name.as_bytes();
+                if bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+                    bail!("absolute path detected in file name");
+                }
+            }
+            if name.starts_with('/') || name.starts_with('\\') {
                 bail!("absolute path detected in file name");
             }
-        }
-        if name.starts_with('/') || name.starts_with('\\') {
-            bail!("absolute path detected in file name");
         }
     }
     #[cfg(not(windows))]
