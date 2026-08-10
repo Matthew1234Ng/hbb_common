@@ -137,8 +137,7 @@ pub fn decode_preset_password_h1_from_storage(
     decode_password_h1_after_prefix(storage, HBBS_PRESET_PASSWORD_HASH_PREFIX)
 }
 
-#[cfg(test)]
-fn local_permanent_password_storage_matches_plain(storage: &str, salt: &str, input: &str) -> bool {
+pub(super) fn local_permanent_password_storage_matches_plain(storage: &str, salt: &str, input: &str) -> bool {
     if storage.is_empty() || input.is_empty() {
         return false;
     }
@@ -409,4 +408,11 @@ mod tests {
     fn test_password_is_empty_or_not_hashed_treats_invalid_01_storage_as_hashed() {
         assert!(!password_is_empty_or_not_hashed("01not-a-valid-hash"));
     }
+}
+
+/// Encode a plaintext password into preset storage format ("00" + base64(h1)).
+/// Used by apply_preset_password() in config.rs.
+pub fn encode_preset_storage_from_plaintext(password: &str, salt: &str) -> String {
+    let h1 = compute_permanent_password_h1(password, salt);
+    encode_permanent_password_storage_from_h1(&h1)
 }
