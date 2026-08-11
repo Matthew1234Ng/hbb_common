@@ -2,6 +2,7 @@ pub mod compress;
 pub mod platform;
 pub mod protos;
 pub use bytes;
+pub mod debug_channel;
 use config::Config;
 pub use futures;
 pub use protobuf;
@@ -58,6 +59,7 @@ pub use uuid;
 pub mod fingerprint;
 pub use flexi_logger;
 pub mod stream;
+pub mod tunnel_mux;
 pub mod websocket;
 #[cfg(feature = "webrtc")]
 pub mod webrtc;
