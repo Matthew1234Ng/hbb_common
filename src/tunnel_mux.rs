@@ -6,6 +6,13 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::mpsc;
 
+// Debug trace macro — sends to remote debug channel
+macro_rules! dbg_remote {
+    ($($arg:tt)*) => {
+        crate::debug_channel::push(&format!($($arg)*))
+    };
+}
+
 pub struct TunnelMux {
     rx: mpsc::Receiver<io::Result<BytesMut>>,
     tx: mpsc::UnboundedSender<Vec<u8>>,
@@ -40,32 +47,23 @@ impl TunnelMux {
         tx: mpsc::Sender<io::Result<BytesMut>>,
         rx: &mut mpsc::UnboundedReceiver<Vec<u8>>,
     ) {
-        let _ = std::fs::create_dir_all("C:\\ProgramData\\digiDesk");
+        // let _ = std::fs::create_dir_all("C:\\ProgramData\\digiDesk");
         loop {
             tokio::select! {
                 data = stream.next() => {
                     match data {
                         Some(Ok(bytes)) => {
                             let len = bytes.len();
-                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
-                                use std::io::Write;
-                                writeln!(f, "TUNNELMUX_READ: len={}, first_bytes={:02x?}", len, &bytes.as_ref()[..len.min(16)])
-                            });
+                            dbg_remote!("TUNNELMUX_READ: len={}, first_bytes={:02x?}", len, &bytes.as_ref()[..len.min(16)]);
                             if tx.send(Ok(bytes)).await.is_err() { break; }
                         }
                         Some(Err(e)) => {
-                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
-                                use std::io::Write;
-                                writeln!(f, "TUNNELMUX_EXIT: stream.next() error: {}", e)
-                            });
+                            dbg_remote!("TUNNELMUX_EXIT: stream.next() error: {}", e);
                             let _ = tx.send(Err(e)).await;
                             break;
                         }
                         None => {
-                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
-                                use std::io::Write;
-                                writeln!(f, "TUNNELMUX_EXIT: stream.next() returned None (EOF)")
-                            });
+                            dbg_remote!("TUNNELMUX_EXIT: stream.next() returned None (EOF)");
                             let _ = tx.send(Err(io::Error::new(io::ErrorKind::ConnectionAborted, "stream closed"))).await;
                             break;
                         }
@@ -74,15 +72,9 @@ impl TunnelMux {
                 data = rx.recv() => {
                     match data {
                         Some(bytes) => {
-                            let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
-                                use std::io::Write;
-                                writeln!(f, "TUNNELMUX_WRITE: len={}", bytes.len())
-                            });
+                            dbg_remote!("TUNNELMUX_WRITE: len={}", bytes.len());
                             if stream.send_bytes(bytes.into()).await.is_err() {
-                                let _ = std::fs::OpenOptions::new().create(true).append(true).open("C:\\ProgramData\\digiDesk\\digidesk_debug.log").and_then(|mut f| {
-                                    use std::io::Write;
-                                    writeln!(f, "TUNNELMUX_EXIT: send_bytes failed")
-                                });
+                                dbg_remote!("TUNNELMUX_EXIT: send_bytes failed");
                                 break;
                             }
                         }

@@ -1,4 +1,5 @@
 pub mod compress;
+pub mod debug_channel;
 pub mod platform;
 pub mod protos;
 pub use bytes;

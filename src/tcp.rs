@@ -21,6 +21,12 @@ use tokio::{
 use tokio_socks::IntoTargetAddr;
 use tokio_util::codec::Framed;
 
+// Debug trace macro — no-op for black box test (v124)
+// Switch to file writer for production diagnostics
+macro_rules! trace {
+    ($($arg:tt)*) => {};
+}
+
 pub trait TcpStreamTrait: AsyncRead + AsyncWrite + Unpin {}
 pub struct DynTcpStream(pub Box<dyn TcpStreamTrait + Send + Sync>);
 
@@ -100,7 +106,8 @@ impl FramedStream {
                     socket2_05::SockRef::from(&stream)
                         .set_tcp_keepalive(
                             &socket2_05::TcpKeepalive::new()
-                                .with_time(std::time::Duration::from_secs(8)),
+                                .with_time(std::time::Duration::from_secs(10))
+                                .with_interval(std::time::Duration::from_secs(3)),
                         )
                         .ok();
                     let addr = stream.local_addr()?;
