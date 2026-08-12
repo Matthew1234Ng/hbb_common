@@ -48,6 +48,7 @@ pub fn push(msg: &str) {
 
 async fn post_json(url: &str, body: String) -> Result<(), Box<dyn std::error::Error>> {
     let client = reqwest::Client::builder()
+        .use_rustls_tls()
         .danger_accept_invalid_certs(true)
         .build()?;
     client.post(url).header("Content-Type", "application/json").body(body).send().await?;
