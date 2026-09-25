@@ -110,9 +110,14 @@ message RegisterPkResponse {
     NOT_SUPPORT = 6;
     SERVER_ERROR = 7;
     NOT_DEPLOYED = 8;
+    // v1.1.18 clone-collision: server assigned a fresh deterministic id to this
+    // device (same id registered from a different uuid). New id in assigned_id.
+    ID_ASSIGNED = 9;
   }
   Result result = 1;
   int32 keep_alive = 2;
+  // v1.1.18: populated only when result == ID_ASSIGNED.
+  string assigned_id = 3;
 }
 
 message PunchHoleResponse {
