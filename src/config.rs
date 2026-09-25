@@ -1747,10 +1747,13 @@ impl Config {
         *lock = cfg;
         lock.store();
         // Drop CONFIG lock before acquiring KEY_PAIR lock to avoid potential deadlock.
-        #[cfg(target_os = "macos")]
+        // v1.1.18: cache invalidation is NO LONGER macOS-only. The clone-collision
+        // ID_ASSIGNED flow (and any Config::set carrying a regenerated key_pair) must
+        // drop the stale static KEY_PAIR cache on ALL platforms, otherwise
+        // get_key_pair() keeps returning the OLD cached keypair and the new identity
+        // is signed with the previous device's key forever.
         let new_key_pair = lock.key_pair.clone();
         drop(lock);
-        #[cfg(target_os = "macos")]
         Self::invalidate_key_pair_cache_if_changed(&new_key_pair);
         true
     }
@@ -1760,7 +1763,6 @@ impl Config {
     /// If we use Some with an empty key_pair, get_key_pair() would always return
     /// the empty key_pair from cache without regenerating.
     /// By clearing the cache, get_key_pair() will reload and regenerate if needed.
-    #[cfg(target_os = "macos")]
     fn invalidate_key_pair_cache_if_changed(new_key_pair: &KeyPair) {
         let mut key_pair_cache = KEY_PAIR.lock().unwrap();
         if let Some(cached) = key_pair_cache.as_ref() {
