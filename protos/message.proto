@@ -389,6 +389,9 @@ message ReadEmptyDirs {
 message ReadEmptyDirsResponse {
   string path = 1;
   repeated FileDirectory empty_dirs = 2;
+  // Optional failure reason. An empty response is indistinguishable from
+  // "no empty dirs", so errors must travel in-band keyed by path.
+  string error = 3;
 }
 
 message ReadAllFiles {
