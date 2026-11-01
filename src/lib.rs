@@ -58,6 +58,7 @@ pub use toml;
 pub use uuid;
 pub mod fingerprint;
 pub use flexi_logger;
+pub mod rx_probe;
 pub mod stream;
 pub mod tunnel_mux;
 pub mod websocket;

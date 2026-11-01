@@ -34,6 +34,19 @@ impl Stream {
         }
     }
 
+    /// The largest message the peer may send. Lowered before authorization, where nothing a peer
+    /// legitimately sends is large, so an unauthenticated connection cannot make us hold more than
+    /// that. Each transport clamps `n` to its own ceiling, so `usize::MAX` restores the default.
+    #[inline]
+    pub fn set_max_packet_length(&mut self, n: usize) {
+        match self {
+            #[cfg(feature = "webrtc")]
+            Stream::WebRTC(s) => s.set_max_packet_length(n),
+            Stream::WebSocket(s) => s.set_max_packet_length(n),
+            Stream::Tcp(s) => s.codec_mut().set_max_packet_length(n),
+        }
+    }
+
     #[inline]
     pub async fn send_bytes(&mut self, bytes: bytes::Bytes) -> ResultType<()> {
         match self {
@@ -61,6 +74,42 @@ impl Stream {
             Stream::WebRTC(s) => s.set_key(key),
             Stream::WebSocket(s) => s.set_key(key),
             Stream::Tcp(s) => s.set_key(key),
+        }
+    }
+
+    /// An opaque token that changes whenever bytes have arrived from the peer, a fragment of a
+    /// message that is still incomplete included. Compare successive samples; the value itself
+    /// means nothing. `None` where the transport reports no such thing.
+    ///
+    /// A message reaches the caller only once it is whole, so `next()` alone cannot distinguish a
+    /// peer sending a large one — a clipboard image is the case that occurs — from one that died
+    /// mid-message. Sampling this alongside the last received message tells them apart.
+    ///
+    /// TCP and WebSocket answer `None` on purpose: this change leaves their existing close, error
+    /// and 30s-timeout behaviour exactly as it was, and giving them a value would alter it.
+    #[inline]
+    pub fn rx_progress(&self) -> Option<u64> {
+        match self {
+            #[cfg(feature = "webrtc")]
+            Stream::WebRTC(s) => Some(s.rx_progress()),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
+    /// Whether ICE has stopped hearing from the peer on a WebRTC transport. Transient and
+    /// recoverable — it says the peer is worth suspecting, never that the session is over — and
+    /// always false for transports this change leaves alone.
+    ///
+    /// Maintained by ICE's own task, so unlike anything derived from the session's read loop it
+    /// stays accurate while that loop is busy sending.
+    #[inline]
+    pub fn webrtc_disconnected(&self) -> bool {
+        match self {
+            #[cfg(feature = "webrtc")]
+            Stream::WebRTC(s) => s.is_disconnected(),
+            #[allow(unreachable_patterns)]
+            _ => false,
         }
     }
 

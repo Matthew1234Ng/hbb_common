@@ -28,6 +28,11 @@ use tokio_tungstenite::{
 use tungstenite::client::IntoClientRequest;
 use tungstenite::protocol::Role;
 
+/// tungstenite's own defaults. `set_max_packet_length` clamps to these, so `usize::MAX` puts the
+/// transport back exactly where it started rather than above it.
+const DEFAULT_MAX_MESSAGE_SIZE: usize = 64 << 20;
+const DEFAULT_MAX_FRAME_SIZE: usize = 16 << 20;
+
 pub struct WsFramedStream {
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     addr: SocketAddr,
@@ -211,6 +216,17 @@ impl WsFramedStream {
         self.encrypt = None;
     }
 
+    /// Both bounds, not just the message one: tungstenite reserves the whole declared payload of a
+    /// frame as soon as it passes `max_frame_size` (`protocol/frame/mod.rs`), so that is what keeps
+    /// a frame header from buying an allocation, while `max_message_size` bounds reassembly.
+    #[inline]
+    pub fn set_max_packet_length(&mut self, n: usize) {
+        self.stream.set_config(|c| {
+            c.max_message_size = Some(n.min(DEFAULT_MAX_MESSAGE_SIZE));
+            c.max_frame_size = Some(n.min(DEFAULT_MAX_FRAME_SIZE));
+        });
+    }
+
     #[inline]
     pub async fn from_tcp_stream(stream: TcpStream, addr: SocketAddr) -> ResultType<Self> {
         let ws_stream =
@@ -298,6 +314,12 @@ impl WsFramedStream {
                     return Some(Ok(bytes));
                 }
                 WsMessage::Text(text) => {
+                    if self.is_secured() {
+                        return Some(Err(Error::new(
+                            ErrorKind::InvalidData,
+                            "WebSocket text frame received after encryption was enabled",
+                        )));
+                    }
                     let bytes = BytesMut::from(text.as_bytes());
                     return Some(Ok(bytes));
                 }
@@ -404,6 +426,33 @@ pub fn check_ws(endpoint: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{keys, Config};
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_secured_stream_rejects_plaintext_text() {
+        sodiumoxide::init().expect("failed to initialize sodiumoxide");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut stream = WebSocketStream::from_raw_socket(tcp, Role::Server, None).await;
+            stream
+                .send(WsMessage::Text("plaintext".into()))
+                .await
+                .unwrap();
+        });
+
+        let tcp = TcpStream::connect(addr).await.unwrap();
+        let mut client = WsFramedStream::from_tcp_stream(tcp, addr).await.unwrap();
+        client.set_key(Key([0x42; sodiumoxide::crypto::secretbox::KEYBYTES]));
+
+        let result = client.next().await;
+        assert!(
+            matches!(result, Some(Err(ref err)) if err.kind() == ErrorKind::InvalidData),
+            "secured stream accepted plaintext Text frame: {:?}",
+            result
+        );
+        server.await.unwrap();
+    }
 
     #[test]
     fn test_check_ws() {

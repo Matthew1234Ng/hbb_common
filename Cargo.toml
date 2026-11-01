@@ -60,7 +60,10 @@ tokio-rustls = { version = "0.26", features = [
 ], default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "rustls-tls"] }
 tokio-native-tls = "0.3"
-tokio-tungstenite = { version = "0.26", features = ["native-tls", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
+# Fork of v0.26.2: upstream's WebSocketStream exposes get_config but no set_config, so a
+# message cap lowered before authorization could never be lifted again. One commit on top of
+# the tag; pinned by rev, not branch, because a fork branch can be rewritten under the lockfile.
+tokio-tungstenite = { git = "https://github.com/rustdesk-org/tokio-tungstenite", rev = "9c320de8e7c546cb654b017b7f4cbb4a5cc09cd9", version = "0.26", features = ["native-tls", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 tungstenite = { version = "0.26", features = ["native-tls", "rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 rustls-platform-verifier = "0.6"
 rustls-pki-types = "1.11"
