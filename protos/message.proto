@@ -897,6 +897,7 @@ message OpenTerminal {
   int32 terminal_id = 1;  // 0 for default terminal
   uint32 rows = 2;
   uint32 cols = 3;
+  string shell = 4;  // optional shell hint: "cmd" | "powershell" | "pwsh"; empty = remote default
 }
 
 message ResizeTerminal {
