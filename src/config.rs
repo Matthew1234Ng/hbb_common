@@ -1043,6 +1043,29 @@ impl Config {
         log::info!("key pair replaced (keypair regen)");
     }
 
+    /// v1.4.7.334 keypair-regen: install a keypair into the in-memory KEY_PAIR cache
+    /// WITHOUT writing to disk, so the hbbs `check_id` registration is signed with the
+    /// NEW key. hbbs binds the pk a peer registers with, so registering first and
+    /// swapping the key afterwards leaves the new id bound to the OLD (family) key —
+    /// the exact defect the golden-image fix exists to remove.
+    pub fn set_key_pair_cache(key_pair: KeyPair) {
+        *KEY_PAIR.lock().unwrap() = Some(key_pair);
+    }
+
+    /// Persist id + keypair in ONE CONFIG write/store: a crash between the two writes
+    /// would otherwise leave a new id signed with the old key (hbbs rejects it) or an
+    /// old id signed with the new key — both make the box unreachable until a manual fix.
+    pub fn set_id_and_key_pair(id: &str, key_pair: KeyPair) {
+        {
+            let mut config = CONFIG.write().unwrap();
+            config.id = id.to_owned();
+            config.key_pair = key_pair;
+            config.store();
+        }
+        *KEY_PAIR.lock().unwrap() = None;
+        log::info!("id + key pair replaced atomically (keypair regen)");
+    }
+
     pub fn set_nat_type(nat_type: i32) {
         let mut config = CONFIG2.write().unwrap();
         if nat_type == config.nat_type {
