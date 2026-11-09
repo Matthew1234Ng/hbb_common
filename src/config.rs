@@ -1028,6 +1028,21 @@ impl Config {
         config.store();
     }
 
+    /// v1.4.7.332 keypair-regen: atomically replace the device signing keypair.
+    /// Stores CONFIG (memory + disk) and clears the static KEY_PAIR cache — same
+    /// all-platform invalidation semantics as `Config::set` — so the next
+    /// `get_key_pair()` / `register_pk` uses the new identity. Used by the webapp
+    /// "Fix Shared Keypair" flow (golden-image clones sharing one key).
+    pub fn replace_key_pair(key_pair: KeyPair) {
+        {
+            let mut config = CONFIG.write().unwrap();
+            config.key_pair = key_pair.clone();
+            config.store();
+        }
+        *KEY_PAIR.lock().unwrap() = None;
+        log::info!("key pair replaced (keypair regen)");
+    }
+
     pub fn set_nat_type(nat_type: i32) {
         let mut config = CONFIG2.write().unwrap();
         if nat_type == config.nat_type {
